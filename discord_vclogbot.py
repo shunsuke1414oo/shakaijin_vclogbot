@@ -4,7 +4,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import json
-
+import pytz #20250503 R.TSURUTA(日本時間実装のため)
 # 設定ファイルを読み込む
 with open('config.json', 'r', encoding='utf-8') as f:
     config = json.load(f)
@@ -22,6 +22,9 @@ intents.message_content = True
 
 # Botのインスタンス作成
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+# 日本標準時 (JST) のタイムゾーンを指定　20250503　R.TSURUTA
+jst = pytz.timezone('Asia/Tokyo')
 
 # Google Sheets認証
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -43,11 +46,11 @@ def update_vc_end_time_and_duration(member_id: str, end_time: str):
     for i in range(len(rows) - 1, 0, -1):  # 1行目はヘッダーなので飛ばす
         row = rows[i]
         
-        # IDが一致し、F列が空白の行を探す
-        if row[0] == member_id and row[5] == "" and target_row_f is None:
+        # IDが一致し、F列が空白の行を探す *かつ、D列がVCの場合も追加
+        if row[0] == member_id and row[3] == "VC" and row[5] == "" and target_row_f is None:
             target_row_f = i + 1  # gspreadは1始まりのインデックス
             
-        # IDが一致し、G列が空白の行を探す
+        # IDが一致し、G列が空白の行を探す かつ、D列がVCの場合も追加
         if row[0] == member_id and row[6] == "" and target_row_g is None:
             target_row_g = i + 1  # gspreadは1始まりのインデックス
             
@@ -69,7 +72,7 @@ def update_vc_end_time_and_duration(member_id: str, end_time: str):
     else:
         print(f"No matching row found for user {member_id} with empty duration (G column).")
 
-# VC参加時間を計算して更新
+# VC参加時間を計算して更新(未使用？)
 def calculate_vc_duration(sheet):
     rows = sheet.get_all_values()[1:]  # ヘッダーを除いたすべての行を取得
     
@@ -97,14 +100,16 @@ def calculate_vc_duration(sheet):
 
 @bot.event
 async def on_voice_state_update(member, before, after):
-    # 入室時
+    #入室時
     if after.channel is not None:
         channel = after.channel
         member_count = len(channel.members)
-
+        print(f"チャンネル名:{channel.name},メンバー数:{member_count}")
         if member_count >= 2:  # VCに2人以上がいる場合
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
+            # 日本時間を追加し、表示形式をデフォルトに変更 20250503 R.TSURUTA
+            #now = datetime.now(jst).strftime("%Y-%m-%d %H:%M:%S")
+            now = datetime.now(jst).strftime("%Y/%m/%d %H:%M:%S")
+
             # 新たに参加したユーザーを記録
             if member.id not in vc_tracking:
                 vc_tracking[member.id] = now  # 参加したユーザーの開始時刻を記録
@@ -140,19 +145,21 @@ async def on_voice_state_update(member, before, after):
         channel = before.channel
         if member.id in vc_tracking:
             start_time = vc_tracking.pop(member.id)  # 退出したユーザーの開始時刻を取得
-            end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # 日本時間を追加し、表示形式をデフォルトに変更 20250503 R.TSURUTA
+            #end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S") 
+            end_time = datetime.now(jst).strftime("%Y/%m/%d %H:%M:%S")
 
             # 開始時間と終了時間をdatetime型に変換
-            start_time_obj = datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
-            end_time_obj = datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
+            #start_time_obj = datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S") #時間の形式がデフォルトになった影響 20250503 R.TSURUTA
+            #end_time_obj = datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S") #時間の形式がデフォルトになった影響 20250503 R.TSURUTA
 
-            # 接続時間（秒）を計算
-            vc_duration = (end_time_obj - start_time_obj).total_seconds()
+            # 接続時間（秒）を計算(未使用のため削除) 20250503 R.TSURUTA
+            #vc_duration = (end_time_obj - start_time_obj).total_seconds()
 
             # VC接続終了時間と接続時間を更新
             update_vc_end_time_and_duration(str(member.id), end_time)
 
-            print(f"{member.name} left {channel.name}. Start: {start_time}, End: {end_time}, Duration: {vc_duration} seconds")
+            print(f"{member.name} left {channel.name}. Start: {start_time}, End: {end_time}")
         
         # 退出後、チャンネル内に1人だけ残った場合は記録を停止
         if len(channel.members) == 1:
@@ -160,7 +167,10 @@ async def on_voice_state_update(member, before, after):
             for member in channel.members:
                 if member.id in vc_tracking:
                     # 1人だけ残った場合、記録の終了処理を追加する
-                    end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    #end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    # 日本時間を追加し、表示形式をデフォルトに変更 20250503 R.TSURUTA
+                    end_time = datetime.now(jst).strftime("%Y/%m/%d %H:%M:%S")
+
                     update_vc_end_time_and_duration(str(member.id), end_time)
                     vc_tracking.pop(member.id)
                     print(f"Stopped recording for {member.name}.")
@@ -169,7 +179,10 @@ async def on_voice_state_update(member, before, after):
         # 2人以上になった場合、再度記録を開始
         elif len(channel.members) >= 2:
             print(f"VC has more than 1 member. Starting record again.")
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # 日本時間を追加し、表示形式をデフォルトに変更 20250503 R.TSURUTA
+            #now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            now = datetime.now(jst)
+            
             for m in channel.members:
                 if m.id not in vc_tracking and vc_active.get(m.id, True) is False:
                     # 新しい行を追加してそのユーザーの記録を開始
